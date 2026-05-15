@@ -1,0 +1,14 @@
+{
+  "best_model": "Logistic Regression",
+  "test_accuracy": 0.7,
+  "cv_accuracy": 0.74,
+  "train_size": 240,
+  "test_size": 60,
+  "total_samples": 300,
+  "classes": ["Neutral", "Negative", "Positive"],
+  "features": "TF-IDF (unigrams + bigrams)",
+  "nb_test_acc": 0.6,
+  "nb_cv_acc": 0.6933,
+  "lr_test_acc": 0.7,
+  "lr_cv_acc": 0.74
+}
