@@ -1,0 +1,334 @@
+"""
+Roman Urdu Sentiment Analyzer — Streamlit Web App
+Classifies Roman Urdu social media text as Positive, Negative, or Neutral
+with confidence scores and real-time prediction.
+"""
+
+import streamlit as st
+import pickle
+import json
+import re
+import pandas as pd
+import numpy as np
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+st.set_page_config(
+    page_title="Roman Urdu Sentiment Analyzer",
+    page_icon="🔍",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================
+# PREPROCESSING (must match training pipeline)
+# ============================================================
+
+ROMAN_URDU_STOPWORDS = {
+    'hai', 'hain', 'ho', 'hota', 'hoti', 'hua', 'hui', 'hun',
+    'ka', 'ke', 'ki', 'ko', 'kya', 'se', 'mein', 'pe', 'par',
+    'ne', 'aur', 'ya', 'bhi', 'toh', 'to', 'ab', 'is', 'us',
+    'ek', 'yeh', 'woh', 'ye', 'wo', 'jo', 'jab', 'tab',
+    'apna', 'apni', 'apne', 'mera', 'meri', 'mere',
+    'tera', 'teri', 'tere', 'uska', 'uski', 'uske',
+    'hum', 'tum', 'woh', 'main', 'tu',
+    'the', 'tha', 'thi', 'raha', 'rahi', 'rahe',
+    'kar', 'karna', 'karni', 'karte', 'karti',
+    'ja', 'jana', 'jata', 'jati', 'jao',
+    'le', 'lena', 'leta', 'leti', 'lo',
+    'de', 'dena', 'deta', 'deti', 'do',
+    'aa', 'aana', 'aata', 'aati', 'aao',
+    'nahi', 'na', 'mat', 'nah',
+    'agar', 'lekin', 'magar', 'phir', 'warna',
+    'abhi', 'kabhi', 'koi', 'kuch', 'sab', 'sirf',
+    'per', 'wala', 'wali', 'wale',
+}
+
+NORMALIZATION_MAP = {
+    'bohat': 'bohot', 'bhot': 'bohot', 'buht': 'bohot', 'bot': 'bohot',
+    'acha': 'acha', 'achha': 'acha', 'accha': 'acha', 'aacha': 'acha',
+    'achi': 'achi', 'achhi': 'achi', 'acchi': 'achi',
+    'bura': 'bura', 'bora': 'bura', 'burra': 'bura',
+    'buri': 'buri', 'burri': 'buri',
+    'kharab': 'kharab', 'kharb': 'kharab', 'khrab': 'kharab',
+    'pasand': 'pasand', 'psand': 'pasand', 'pasnd': 'pasand',
+    'zabardast': 'zabardast', 'zbrdst': 'zabardast', 'zabrdast': 'zabardast',
+    'shandar': 'shandar', 'shandaar': 'shandar', 'shandr': 'shandar',
+    'ghatiya': 'ghatiya', 'ghtiya': 'ghatiya', 'ghatya': 'ghatiya',
+    'khush': 'khush', 'khsh': 'khush', 'kush': 'khush',
+    'dukh': 'dukh', 'dukhi': 'dukhi', 'dkh': 'dukh',
+    'lajawab': 'lajawab', 'lajwab': 'lajawab', 'ljwab': 'lajawab',
+    'behtareen': 'behtareen', 'behtreen': 'behtareen', 'behtereen': 'behtareen',
+    'bekaar': 'bekaar', 'bekar': 'bekaar', 'bekr': 'bekaar',
+    'kamaal': 'kamaal', 'kamal': 'kamaal', 'kmal': 'kamaal',
+    'mazaa': 'maza', 'mza': 'maza', 'maaza': 'maza',
+    'lazeez': 'lazeez', 'laziz': 'lazeez', 'lzeez': 'lazeez',
+    'pareshan': 'pareshan', 'preshan': 'pareshan', 'prshan': 'pareshan',
+}
+
+
+def preprocess_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = text.lower().strip()
+    text = re.sub(r'http\S+|www\.\S+', '', text)
+    text = re.sub(r'@\w+', '', text)
+    text = re.sub(r'#\w+', '', text)
+    text = re.sub(r'[^\w\s]', '', text)
+    text = re.sub(r'\d+', '', text)
+    text = re.sub(r'(.)\1{2,}', r'\1\1', text)
+    tokens = text.split()
+    tokens = [NORMALIZATION_MAP.get(t, t) for t in tokens]
+    tokens = [t for t in tokens if t not in ROMAN_URDU_STOPWORDS and len(t) > 1]
+    return ' '.join(tokens)
+
+
+# ============================================================
+# LOAD MODEL
+# ============================================================
+@st.cache_resource
+def load_model():
+    with open("model/sentiment_model.pkl", "rb") as f:
+        model = pickle.load(f)
+    with open("model/metadata.json", "r") as f:
+        metadata = json.load(f)
+    return model, metadata
+
+
+model, metadata = load_model()
+
+
+# ============================================================
+# CUSTOM CSS
+# ============================================================
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        padding: 1rem 0;
+    }
+    .sentiment-positive {
+        background: linear-gradient(135deg, #d4edda, #c3e6cb);
+        padding: 1.5rem;
+        border-radius: 12px;
+        border-left: 5px solid #28a745;
+        margin: 1rem 0;
+    }
+    .sentiment-negative {
+        background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+        padding: 1.5rem;
+        border-radius: 12px;
+        border-left: 5px solid #dc3545;
+        margin: 1rem 0;
+    }
+    .sentiment-neutral {
+        background: linear-gradient(135deg, #d1ecf1, #bee5eb);
+        padding: 1.5rem;
+        border-radius: 12px;
+        border-left: 5px solid #17a2b8;
+        margin: 1rem 0;
+    }
+    .confidence-bar {
+        height: 8px;
+        border-radius: 4px;
+        margin: 4px 0;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+        border: 1px solid #e9ecef;
+    }
+    .stTextArea textarea {
+        font-size: 16px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+with st.sidebar:
+    st.markdown("### 📊 Model Info")
+    st.markdown(f"**Model:** {metadata['best_model']}")
+    st.markdown(f"**Test Accuracy:** {metadata['test_accuracy']*100:.1f}%")
+    st.markdown(f"**CV Accuracy:** {metadata['cv_accuracy']*100:.1f}%")
+    st.markdown(f"**Training Samples:** {metadata['total_samples']}")
+    st.markdown(f"**Features:** {metadata['features']}")
+    
+    st.markdown("---")
+    st.markdown("### 🔬 Model Comparison")
+    comparison_df = pd.DataFrame({
+        "Model": ["Naive Bayes", "Logistic Regression"],
+        "Test Acc": [f"{metadata['nb_test_acc']*100:.1f}%", f"{metadata['lr_test_acc']*100:.1f}%"],
+        "CV Acc": [f"{metadata['nb_cv_acc']*100:.1f}%", f"{metadata['lr_cv_acc']*100:.1f}%"],
+    })
+    st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    st.markdown("### ℹ️ About")
+    st.markdown("""
+    This tool classifies **Roman Urdu** (Urdu written in Latin script) 
+    social media text into three sentiment categories.
+    
+    **Pipeline:**
+    - Custom tokenizer
+    - Stop-word removal
+    - Spelling normalization
+    - TF-IDF + N-gram features
+    - ML classification
+    
+    Built as an NLP research project for low-resource language sentiment analysis.
+    """)
+
+
+# ============================================================
+# MAIN APP
+# ============================================================
+st.markdown("<div class='main-header'>", unsafe_allow_html=True)
+st.title("🔍 Roman Urdu Sentiment Analyzer")
+st.markdown("*Analyze sentiment in Roman Urdu social media text*")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Input
+st.markdown("### Enter Roman Urdu Text")
+user_input = st.text_area(
+    label="Type or paste Roman Urdu text below:",
+    placeholder="e.g., yeh bohot acha product hai mujhe pasand aya",
+    height=120,
+    label_visibility="collapsed"
+)
+
+# Example texts
+st.markdown("**Try these examples:**")
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("😊 Positive", use_container_width=True):
+        user_input = "bohot maza aya aaj party mein kya zabardast time tha"
+        st.session_state['example_text'] = user_input
+with col2:
+    if st.button("😠 Negative", use_container_width=True):
+        user_input = "yeh product bekaar hai bohot ghatiya quality waste of money"
+        st.session_state['example_text'] = user_input
+with col3:
+    if st.button("😐 Neutral", use_container_width=True):
+        user_input = "kal university jana hai class hai subah 9 baje"
+        st.session_state['example_text'] = user_input
+
+# Use example text if button was clicked
+if 'example_text' in st.session_state:
+    user_input = st.session_state['example_text']
+    del st.session_state['example_text']
+    st.rerun()
+
+# Analyze button
+if st.button("🔍 Analyze Sentiment", type="primary", use_container_width=True):
+    if user_input.strip():
+        # Preprocess
+        cleaned = preprocess_text(user_input)
+        
+        if cleaned.strip():
+            # Predict
+            prediction = model.predict([cleaned])[0]
+            probabilities = model.predict_proba([cleaned])[0]
+            classes = model.classes_
+            
+            # Map class to display
+            emoji_map = {"Positive": "😊", "Negative": "😠", "Neutral": "😐"}
+            color_map = {"Positive": "positive", "Negative": "negative", "Neutral": "neutral"}
+            
+            # Result card
+            st.markdown(f"""
+            <div class='sentiment-{color_map[prediction]}'>
+                <h2 style='margin:0; font-size:28px;'>{emoji_map[prediction]} {prediction}</h2>
+                <p style='margin:5px 0 0 0; opacity:0.8;'>
+                    Confidence: {max(probabilities)*100:.1f}%
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Confidence breakdown
+            st.markdown("### Confidence Scores")
+            for cls, prob in sorted(zip(classes, probabilities), key=lambda x: x[1], reverse=True):
+                emoji = emoji_map.get(cls, "")
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.progress(float(prob))
+                with col_b:
+                    st.markdown(f"**{emoji} {cls}**: {prob*100:.1f}%")
+            
+            # Preprocessing details (expandable)
+            with st.expander("🔧 Preprocessing Details"):
+                st.markdown(f"**Original text:** {user_input}")
+                st.markdown(f"**Cleaned text:** {cleaned}")
+                
+                original_tokens = user_input.lower().split()
+                cleaned_tokens = cleaned.split()
+                removed = set(original_tokens) - set(cleaned_tokens)
+                if removed:
+                    st.markdown(f"**Removed tokens:** {', '.join(removed)}")
+        else:
+            st.warning("After preprocessing, no meaningful tokens remained. Try a longer or more descriptive text.")
+    else:
+        st.warning("Please enter some text to analyze.")
+
+
+# ============================================================
+# BATCH ANALYSIS
+# ============================================================
+st.markdown("---")
+st.markdown("### 📋 Batch Analysis")
+st.markdown("Enter multiple texts (one per line) to analyze in bulk:")
+
+batch_input = st.text_area(
+    label="Batch input",
+    placeholder="yeh bohot acha hai\nyeh bekaar hai\nkal meeting hai",
+    height=100,
+    key="batch",
+    label_visibility="collapsed"
+)
+
+if st.button("📊 Analyze Batch", use_container_width=True):
+    if batch_input.strip():
+        lines = [l.strip() for l in batch_input.strip().split('\n') if l.strip()]
+        
+        results = []
+        for line in lines:
+            cleaned = preprocess_text(line)
+            if cleaned.strip():
+                pred = model.predict([cleaned])[0]
+                probs = model.predict_proba([cleaned])[0]
+                confidence = max(probs) * 100
+                emoji = {"Positive": "😊", "Negative": "😠", "Neutral": "😐"}
+                results.append({
+                    "Text": line[:60] + ("..." if len(line) > 60 else ""),
+                    "Sentiment": f"{emoji.get(pred, '')} {pred}",
+                    "Confidence": f"{confidence:.1f}%"
+                })
+        
+        if results:
+            results_df = pd.DataFrame(results)
+            st.dataframe(results_df, hide_index=True, use_container_width=True)
+            
+            # Summary
+            sentiments = [r["Sentiment"].split()[-1] for r in results]
+            counts = pd.Series(sentiments).value_counts()
+            st.markdown(f"**Summary:** {len(results)} texts analyzed — "
+                       f"Positive: {counts.get('Positive', 0)}, "
+                       f"Negative: {counts.get('Negative', 0)}, "
+                       f"Neutral: {counts.get('Neutral', 0)}")
+    else:
+        st.warning("Please enter at least one text line.")
+
+
+# Footer
+st.markdown("---")
+st.markdown(
+    "<p style='text-align:center; opacity:0.5; font-size:12px;'>"
+    "Roman Urdu Sentiment Analyzer — NLP Project | Built with Scikit-learn & Streamlit"
+    "</p>",
+    unsafe_allow_html=True
+)
